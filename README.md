@@ -10,6 +10,12 @@ Given an IP address (IPv4 or IPv6), geodude resolves it to location data such as
 
 Geodude uses IP2Location databases for lookups. You will need to supply an IP2Location database file (e.g. `IP2LOCATION-LITE-DB*.BIN`) at runtime. See [ip2location.com](https://www.ip2location.com/) for available databases and licensing.
 
+## Development Mode
+
+```sh
+./dev.sh
+```
+
 ## Building
 
 ```sh
