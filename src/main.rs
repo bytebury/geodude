@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 use axum::{
     Router,
-    extract::{Path, State},
+    extract::{Path, Request, State},
     http::StatusCode,
-    response::Json,
+    middleware::{self, Next},
+    response::{Json, Response},
     routing::get,
 };
 use ip2location::{DB, Record, error::Error as Ip2LocationError};
@@ -58,6 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/geolocation/{ip_address}", get(geo_lookup))
         .route("/health", get(health))
+        .layer(middleware::from_fn(log_requests))
         .with_state(state);
 
     let port: u16 = env::var("PORT")
@@ -74,6 +76,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn log_requests(req: Request, next: Next) -> Response {
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let response = next.run(req).await;
+    tracing::info!("{method} {uri} -> {}", response.status());
+    response
 }
 
 async fn geo_lookup(
