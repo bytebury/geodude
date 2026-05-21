@@ -9,14 +9,14 @@ use axum::{
     response::Json,
     routing::get,
 };
-use ip2location::{DB, Record};
+use ip2location::{DB, Record, error::Error as Ip2LocationError};
 use serde::Serialize;
 
 struct AppState {
     db: DB,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct GeoResponse {
     ip: String,
     country_code: Option<String>,
@@ -45,9 +45,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let bin_path = env::var("IP2LOCATION_BIN_PATH")
         .unwrap_or_else(|_| "/data/ip2location.BIN".to_string());
+    let bin_size = std::fs::metadata(&bin_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
     let db = DB::from_file(&bin_path)
         .map_err(|e| format!("failed to open {bin_path}: {e:?}"))?;
-    tracing::info!("loaded IP2Location database from {bin_path}");
+    tracing::info!("loaded IP2Location database from {bin_path} ({bin_size} bytes)");
+    db.print_db_info();
 
     let state = Arc::new(AppState { db });
 
@@ -85,13 +89,19 @@ async fn geo_lookup(
         )
     })?;
 
-    let record = state.db.ip_lookup(parsed).map_err(|e| {
-        (
+    let record = state.db.ip_lookup(parsed).map_err(|e| match e {
+        Ip2LocationError::RecordNotFound => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: format!("no record found for {ip}"),
+            }),
+        ),
+        other => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
-                error: format!("lookup failed: {e:?}"),
+                error: format!("lookup failed: {other:?}"),
             }),
-        )
+        ),
     })?;
 
     let response = match record {
@@ -113,6 +123,8 @@ async fn geo_lookup(
             ));
         }
     };
+
+    tracing::info!("{response:?}");
 
     Ok(Json(response))
 }
