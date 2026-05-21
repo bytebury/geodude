@@ -41,10 +41,13 @@ In the service's **Variables** tab, add:
 | `IP2LOCATION_TOKEN`     | `xxxxxxxxxxxx`  | Your IP2Location download token. Keep this secret.                      |
 | `IP2LOCATION_FILE_CODE` | `DB11LITEBIN`   | The file code of the database edition to download.                      |
 | `IP2LOCATION_BIN_PATH`  | `/data/ip2location.BIN` | Optional. Where the BIN is written inside the container. Defaults to `/data/ip2location.BIN`. |
+| `IP2LOCATION_MAX_AGE_DAYS` | `30`         | Optional. How old the BIN can get before the entrypoint re-downloads it on boot. Defaults to `30`. |
 
 ### 3. (Optional) Attach a volume
 
-If you'd rather not re-download on every deploy, attach a Railway volume mounted at `/data` (or whichever directory contains `IP2LOCATION_BIN_PATH`). The entrypoint only downloads when the file is missing, so a persisted volume short-circuits subsequent boots.
+If you'd rather not re-download on every deploy, attach a Railway volume mounted at `/data` (or whichever directory contains `IP2LOCATION_BIN_PATH`). The entrypoint downloads when the file is missing **or** older than `IP2LOCATION_MAX_AGE_DAYS` (default 30), so a persisted volume short-circuits subsequent boots while still picking up monthly IP2Location updates automatically.
+
+If the BIN is stale but the download fails (e.g. quota exceeded or token unset), the service keeps running with the existing file and logs a warning — it only hard-fails when there is no BIN at all.
 
 Without a volume, the database is fetched fresh on every cold start — fine for an internal API and the simplest way to pick up monthly DB updates (just redeploy).
 
@@ -54,7 +57,9 @@ Push to the branch Railway is tracking, or run `railway up`. Railway builds the 
 
 ## Refreshing the database
 
-IP2Location updates their databases monthly. To refresh:
+IP2Location updates their databases monthly. The entrypoint refreshes automatically when the BIN is missing or older than `IP2LOCATION_MAX_AGE_DAYS` (default `30`), so on a normal cadence you don't need to do anything — the next restart after the file ages past the threshold pulls a new copy.
+
+To force an immediate refresh:
 
 - **Without a volume:** redeploy the service. The entrypoint downloads the current edition on boot.
-- **With a volume:** `railway ssh` in, delete the existing `.BIN`, and restart the service — or temporarily detach the volume and redeploy.
+- **With a volume:** `railway ssh` in, delete the existing `.BIN`, and restart the service — or temporarily detach the volume and redeploy. You can also lower `IP2LOCATION_MAX_AGE_DAYS` (e.g. to `0`) and restart to trigger the refresh path.
