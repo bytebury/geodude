@@ -42,6 +42,7 @@ In the service's **Variables** tab, add:
 | `IP2LOCATION_FILE_CODE` | `DB11LITEBIN`   | The file code of the database edition to download.                      |
 | `IP2LOCATION_BIN_PATH`  | `/data/ip2location.BIN` | Optional. Where the BIN is written inside the container. Defaults to `/data/ip2location.BIN`. |
 | `IP2LOCATION_MAX_AGE_DAYS` | `30`         | Optional. How old the BIN can get before the entrypoint re-downloads it on boot. Defaults to `30`. |
+| `ADMIN_REFRESH_TOKEN`   | `xxxxxxxxxxxx`  | Optional. Shared secret required to call `POST /admin/refresh-db`. Leave unset to disable the endpoint (returns `503`). |
 
 ### 3. (Optional) Attach a volume
 
@@ -57,9 +58,23 @@ Push to the branch Railway is tracking, or run `railway up`. Railway builds the 
 
 ## Refreshing the database
 
-IP2Location updates their databases monthly. The entrypoint refreshes automatically when the BIN is missing or older than `IP2LOCATION_MAX_AGE_DAYS` (default `30`), so on a normal cadence you don't need to do anything — the next restart after the file ages past the threshold pulls a new copy.
+IP2Location updates their databases monthly. The entrypoint refreshes automatically when the BIN is missing or older than `IP2LOCATION_MAX_AGE_DAYS` (default `30`) on boot. For long-running deploys with a persistent volume, a cron job can hit the refresh endpoint instead, avoiding a restart.
 
-To force an immediate refresh:
+### Scheduled refresh via `/admin/refresh-db`
+
+Set `ADMIN_REFRESH_TOKEN` and `POST /admin/refresh-db` once a month with the matching bearer token. The handler:
+
+1. Returns `401` unless `Authorization: Bearer $ADMIN_REFRESH_TOKEN` matches.
+2. Stats the BIN. If it is younger than `IP2LOCATION_MAX_AGE_DAYS`, returns `200 {"status":"skipped",...}` without contacting IP2Location.
+3. Otherwise runs `refresh-db.sh` (which downloads, unzips, and atomically replaces the BIN), reloads the in-memory database, and returns `200 {"status":"refreshed",...}`.
+
+Example cron entry (runs daily at 03:00 UTC; the handler itself short-circuits until the BIN ages past the threshold):
+
+```cron
+0 3 * * * curl -fsS -X POST -H "Authorization: Bearer $ADMIN_REFRESH_TOKEN" https://geodude.example.com/admin/refresh-db
+```
+
+### Forcing an immediate refresh
 
 - **Without a volume:** redeploy the service. The entrypoint downloads the current edition on boot.
-- **With a volume:** `railway ssh` in, delete the existing `.BIN`, and restart the service — or temporarily detach the volume and redeploy. You can also lower `IP2LOCATION_MAX_AGE_DAYS` (e.g. to `0`) and restart to trigger the refresh path.
+- **With a volume:** `railway ssh` in, delete the existing `.BIN`, and restart the service — or temporarily detach the volume and redeploy. You can also lower `IP2LOCATION_MAX_AGE_DAYS` (e.g. to `0`) and call `/admin/refresh-db` (or restart) to trigger the refresh path.

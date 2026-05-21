@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=builder /app/target/release/geodude /app/geodude
 COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+COPY refresh-db.sh /app/refresh-db.sh
+RUN chmod +x /app/entrypoint.sh /app/refresh-db.sh
 ENV IP2LOCATION_BIN_PATH=/data/ip2location.BIN
 EXPOSE 8080
 ENTRYPOINT ["/app/entrypoint.sh"]
