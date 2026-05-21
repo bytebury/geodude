@@ -1,5 +1,5 @@
 use std::env;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use axum::{
@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(8080);
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let addr = SocketAddr::from((Ipv6Addr::UNSPECIFIED, port));
     tracing::info!("listening on {addr}");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
