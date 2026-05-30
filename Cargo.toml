@@ -2,6 +2,8 @@
 name = "geodude"
 version = "0.1.0"
 edition = "2024"
+description = "SDK for geodude, a geolocation microservice that's built on top of ip2location."
+license = "MIT"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
