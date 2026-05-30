@@ -1,16 +1,52 @@
 # geodude 🪨
 
-A geolocation microservice written in Rust. Geodude accepts an IP address and returns location information for it, using [IP2Location](https://www.ip2location.com/) as its underlying geolocation data source.
+IP geolocation in Rust, backed by [IP2Location](https://www.ip2location.com/). Geodude ships as:
 
-## Overview
+- an **HTTP microservice** that owns the IP2Location database, and
+- a **Rust client crate** that other services use to query it.
 
-Given an IP address (IPv4 or IPv6), geodude resolves it to location data such as country, region, city, and coordinates. It is designed to be deployed as a small, self-contained service that other applications can call when they need to geolocate a request.
+The pattern is: deploy one geodude server somewhere, then `cargo add geodude` in every other Rust service that needs geolocation. The server keeps the BIN and the IP2Location credentials in one place; clients just make HTTP calls.
+
+## Client usage
+
+```toml
+[dependencies]
+geodude = "0.1"  # client by default; no need to disable anything
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+Point at your server once and call from anywhere:
+
+```rust
+geodude::setup("https://geodude.example.com")?;
+let loc = geodude::locate("8.8.8.8").await?;
+println!("{:?}", loc.country_name);
+```
+
+Or let it pick up the URL from the environment:
+
+```rust
+let loc = geodude::locate("8.8.8.8").await?; // reads GEODUDE_URL from environment variables
+```
+
+`locate` lazily falls back to `GEODUDE_URL` on first call, so for the env-only path you can skip `from_env()` entirely. For multiple servers or finer control over the `reqwest::Client`, use `geodude::Client::new(url)` directly. `locate` accepts `IpAddr`, `Ipv4Addr`, `Ipv6Addr`, `&str`, `&String`, or `String` via the `IntoIpAddr` trait.
+
+### Cargo features
+
+| Feature  | Default | Purpose                                                                                           |
+| -------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `client` | yes     | Builds the HTTP client (`reqwest` + `serde_json`).                                                |
+| `server` | no      | Builds the geodude server binary; pulls in axum, tokio, tracing, dotenvy, and `ip2location`.       |
+
+Run the server locally with `cargo run --no-default-features --features server`. The Dockerfile and `dev.sh` already pass these flags.
+
+## Server
 
 ## Data source
 
 Geodude uses IP2Location databases for lookups. You will need to supply an IP2Location database file (e.g. `IP2LOCATION-LITE-DB*.BIN`) at runtime. See [ip2location.com](https://www.ip2location.com/) for available databases and licensing.
 
-## Development Mode
+## Development mode (microservice)
 
 ```sh
 ./dev.sh
@@ -30,7 +66,7 @@ cargo run --release
 
 For local development, download a `.BIN` from IP2Location manually and point geodude at it via `IP2LOCATION_BIN_PATH`.
 
-## Deploying to Railway
+## Deploying 
 
 Geodude is published as a Docker image. On container startup, `entrypoint.sh` downloads the `.BIN` from IP2Location using your account token, so the database is never baked into the image or committed to the repo.
 
@@ -38,7 +74,7 @@ Geodude is published as a Docker image. On container startup, `entrypoint.sh` do
 
 Sign in at [ip2location.com](https://www.ip2location.com/), open your account's [download page](https://www.ip2location.com/file-download), and copy your download token. Note the file code of the database you want (e.g. `DB11LITEBIN` for the LITE DB11 BIN).
 
-### 2. Set Railway variables
+### 2. Set Environment variables
 
 In the service's **Variables** tab, add:
 
@@ -52,15 +88,11 @@ In the service's **Variables** tab, add:
 
 ### 3. (Optional) Attach a volume
 
-If you'd rather not re-download on every deploy, attach a Railway volume mounted at `/data` (or whichever directory contains `IP2LOCATION_BIN_PATH`). The entrypoint downloads when the file is missing **or** older than `IP2LOCATION_MAX_AGE_DAYS` (default 30), so a persisted volume short-circuits subsequent boots while still picking up monthly IP2Location updates automatically.
+If you'd rather not re-download on every deploy, attach a volume mounted at `/data` (or whichever directory contains `IP2LOCATION_BIN_PATH`). The entrypoint downloads when the file is missing **or** older than `IP2LOCATION_MAX_AGE_DAYS` (default 30), so a persisted volume short-circuits subsequent boots while still picking up monthly IP2Location updates automatically.
 
 If the BIN is stale but the download fails (e.g. quota exceeded or token unset), the service keeps running with the existing file and logs a warning — it only hard-fails when there is no BIN at all.
 
 Without a volume, the database is fetched fresh on every cold start — fine for an internal API and the simplest way to pick up monthly DB updates (just redeploy).
-
-### 4. Deploy
-
-Push to the branch Railway is tracking, or run `railway up`. Railway builds the Dockerfile, the container boots, the entrypoint pulls the BIN, and the service starts.
 
 ## Refreshing the database
 
@@ -79,8 +111,3 @@ Example cron entry (runs daily at 03:00 UTC; the handler itself short-circuits u
 ```cron
 0 3 * * * curl -fsS -X POST -H "Authorization: Bearer $ADMIN_REFRESH_TOKEN" https://geodude.example.com/admin/refresh-db
 ```
-
-### Forcing an immediate refresh
-
-- **Without a volume:** redeploy the service. The entrypoint downloads the current edition on boot.
-- **With a volume:** `railway ssh` in, delete the existing `.BIN`, and restart the service — or temporarily detach the volume and redeploy. You can also lower `IP2LOCATION_MAX_AGE_DAYS` (e.g. to `0`) and call `/admin/refresh-db` (or restart) to trigger the refresh path.

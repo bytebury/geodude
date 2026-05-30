@@ -28,4 +28,4 @@ fi
 
 # Start the dev server
 echo "🦀 Starting Rust dev server..."
-cargo watch -x 'run'
+cargo watch -x 'run --no-default-features --features server'

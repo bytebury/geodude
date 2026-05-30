@@ -1,7 +1,7 @@
 use std::env;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 
 use axum::{
@@ -12,9 +12,9 @@ use axum::{
     response::{Json, Response},
     routing::{get, post},
 };
+use geodude::Location;
 use ip2location::{DB, Record, error::Error as Ip2LocationError};
 use serde::Serialize;
-use tokio::sync::RwLock;
 
 struct AppState {
     db: RwLock<DB>,
@@ -22,14 +22,6 @@ struct AppState {
     max_age_days: u64,
     refresh_token: Option<String>,
     refresh_script: PathBuf,
-}
-
-#[derive(Debug, Serialize)]
-struct GeoResponse {
-    country_code: Option<String>,
-    country_name: Option<String>,
-    region: Option<String>,
-    city: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -128,7 +120,7 @@ async fn log_requests(req: Request, next: Next) -> Response {
 async fn geo_lookup(
     State(state): State<Arc<AppState>>,
     Path(ip): Path<String>,
-) -> Result<Json<GeoResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<Location>, (StatusCode, Json<ErrorResponse>)> {
     let parsed: IpAddr = ip.parse().map_err(|_| {
         (
             StatusCode::BAD_REQUEST,
@@ -138,7 +130,7 @@ async fn geo_lookup(
         )
     })?;
 
-    let db = state.db.read().await;
+    let db = state.db.read().expect("database lock poisoned");
     let record = db.ip_lookup(parsed).map_err(|e| match e {
         Ip2LocationError::RecordNotFound => (
             StatusCode::NOT_FOUND,
@@ -155,7 +147,7 @@ async fn geo_lookup(
     })?;
 
     let response = match record {
-        Record::LocationDb(loc) => GeoResponse {
+        Record::LocationDb(loc) => Location {
             country_code: loc.country.as_ref().map(|c| c.short_name.to_string()),
             country_name: loc.country.as_ref().map(|c| c.long_name.to_string()),
             region: loc.region.as_ref().map(|s| s.to_string()),
@@ -290,7 +282,7 @@ async fn refresh_db(
         .map(|m| m.len())
         .unwrap_or(0);
 
-    *state.db.write().await = new_db;
+    *state.db.write().expect("database lock poisoned") = new_db;
 
     tracing::info!("refreshed IP2Location database in place ({new_size} bytes)");
 
